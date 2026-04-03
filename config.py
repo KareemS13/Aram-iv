@@ -9,11 +9,11 @@ from pathlib import Path
 YEREVAN_LAT = 40.18
 YEREVAN_LON = 44.51
 
-BBOX = {"north": 40.6, "south": 39.8, "east": 45.2, "west": 44.0}
+BBOX = {"north": 40.24, "south": 40.08, "east": 44.63, "west": 44.35}
 
 # WKT polygon (lon lat order, closed ring) for OData spatial filter
 BBOX_WKT = (
-    "POLYGON((44.0 39.8,45.2 39.8,45.2 40.6,44.0 40.6,44.0 39.8))"
+    "POLYGON((44.35 40.08,44.63 40.08,44.63 40.24,44.35 40.24,44.35 40.08))"
 )
 
 # ── CDSE / Sentinel-5P ────────────────────────────────────────────────────────
