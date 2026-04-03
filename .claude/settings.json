@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:catalogue.dataspace.copernicus.eu)",
+      "WebFetch(domain:documentation.dataspace.copernicus.eu)",
+      "WebFetch(domain:cds.climate.copernicus.eu)",
+      "WebFetch(domain:sentinels.copernicus.eu)",
+      "WebFetch(domain:confluence.ecmwf.int)",
+      "WebFetch(domain:www.acgeospatial.co.uk)",
+      "WebFetch(domain:github.com)",
+      "Bash(wc -l /c/Users/Kareem/OneDrive/Desktop/Aram/*.py /c/Users/Kareem/OneDrive/Desktop/Aram/*.txt /c/Users/Kareem/OneDrive/Desktop/Aram/.claude/*.json)",
+      "Bash(python -c \"import ee; ee.Initialize\\(project='ee-kareemsaffarini9'\\); result = ee.data.listAssets\\({'parent': 'projects/earthengine-public/assets/COPERNICUS/S5P/OFFL'}\\); print\\(result\\)\")",
+      "Bash(python -c \"import ee; ee.Initialize\\(project='ee-kareemsaffarini9'\\); print\\(ee.ImageCollection\\('COPERNICUS/S5P/OFFL/L3_NO2'\\).first\\(\\).bandNames\\(\\).getInfo\\(\\)\\)\")",
+      "Bash(python -c ':*)",
+      "WebFetch(domain:teevial.com)",
+      "Bash(curl -s https://teevial.com/)",
+      "Bash(curl -s https://teevial.com/assets/index-CO75R_TR.css)",
+      "Bash(curl -s https://teevial.com/assets/index-BKj6ABqK.js)",
+      "Bash(grep -o '--color-[^:]*:[^;]*')",
+      "Bash(curl -s 'https://teevial.com/assets/index-CO75R_TR.css')",
+      "Bash(curl -s 'https://teevial.com/')"
+    ]
+  }
+}

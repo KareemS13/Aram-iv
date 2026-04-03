@@ -1,0 +1,20 @@
+# Core scientific stack
+numpy>=1.24
+pandas>=2.0
+xarray>=2023.6
+netCDF4>=1.6
+h5netcdf>=1.2
+
+# Copernicus Data APIs
+requests>=2.31
+cdsapi>=0.7.7
+
+# Machine learning
+lightgbm>=4.0
+scikit-learn>=1.3
+
+# Calendar / holidays
+holidays>=0.46
+
+# Visualisation
+matplotlib>=3.7

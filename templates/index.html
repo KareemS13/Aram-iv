@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Yerevan NO₂ Forecast</title>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 10px; }
+
+    body {
+      font-family: 'Montserrat', sans-serif;
+      background: #081134;
+      color: #ffffff;
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    /* ── Progress bar ── */
+    #progress-bar {
+      position: fixed; top: 0; left: 0; z-index: 100;
+      height: 3px;
+      width: 0%;
+      background: linear-gradient(90deg, #203175, #d7e1fb);
+      transition: width 0.4s ease;
+      pointer-events: none;
+    }
+
+    /* ── Header ── */
+    header {
+      position: sticky; top: 0; z-index: 10;
+      height: 7.6rem;
+      display: flex; align-items: center;
+      padding: 0 3rem;
+      background: rgba(8,17,52,0.5);
+      backdrop-filter: blur(4.5px);
+      -webkit-backdrop-filter: blur(4.5px);
+      box-shadow: 0 0.3rem 1.6rem rgba(8,17,52,0.35);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .logo {
+      font-size: 1.6rem;
+      font-weight: 600;
+      color: #ffffff;
+      letter-spacing: 0.05em;
+    }
+    .logo span { color: #d7e1fb; font-weight: 300; }
+
+    /* ── Main ── */
+    main {
+      max-width: 120rem;
+      margin: 0 auto;
+      padding: 10rem 3rem 12rem;
+    }
+
+    /* ── Hero ── */
+    .hero {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      align-items: center;
+      gap: 4rem;
+      margin-bottom: 8rem;
+    }
+
+    @media (max-width: 860px) {
+      .hero { grid-template-columns: 1fr; }
+      .hero__visual { display: none; }
+    }
+
+    .hero__visual {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      position: relative;
+      top: -25px;
+      left: 25px;
+    }
+
+    #sphere-canvas {
+      width: 100%;
+      max-width: 100%;
+      height: auto;
+    }
+
+    .hero__tag {
+      display: inline-block;
+      font-size: 1.2rem;
+      font-weight: 500;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #627b9d;
+      margin-bottom: 2rem;
+    }
+
+    .hero__title {
+      font-size: clamp(3.2rem, 4vw, 5.6rem);
+      font-weight: 700;
+      line-height: 1.15;
+      color: #ffffff;
+      margin-bottom: 2rem;
+    }
+    .hero__title span { color: #d7e1fb; font-weight: 300; }
+
+    .hero__desc {
+      font-size: 1.6rem;
+      font-weight: 300;
+      color: #627b9d;
+      max-width: 52rem;
+      line-height: 1.7;
+      margin-bottom: 4rem;
+    }
+
+    /* ── Button ── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 1rem;
+      height: 4.8rem;
+      padding: 0 3.2rem;
+      font-family: 'Montserrat', sans-serif;
+      font-size: 1.4rem;
+      font-weight: 500;
+      color: #ffffff;
+      background: #122766;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 0.4rem;
+      cursor: pointer;
+      transition: background-color 0.4s, border-color 0.4s, transform 0.2s;
+    }
+    .btn:hover:not(:disabled) {
+      background: #203175;
+      border-color: rgba(255,255,255,0.3);
+      transform: translateY(-1px);
+    }
+    .btn:active:not(:disabled) { transform: translateY(0); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Status ── */
+    #status {
+      margin-top: 2rem;
+      font-size: 1.3rem;
+      font-weight: 400;
+      color: #627b9d;
+      min-height: 2rem;
+      transition: opacity 0.3s;
+    }
+
+    /* ── Error ── */
+    #error {
+      display: none;
+      margin-top: 2.4rem;
+      padding: 1.6rem 2rem;
+      background: rgba(215,0,0,0.08);
+      border: 1px solid rgba(215,0,0,0.3);
+      border-radius: 0.4rem;
+      font-size: 1.3rem;
+      color: #fca5a5;
+      animation: fadeSlideUp 0.3s ease;
+    }
+
+    /* ── Section label ── */
+    .section-label {
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #627b9d;
+      margin-bottom: 2.4rem;
+    }
+
+    /* ── Cards ── */
+    #result { display: none; margin-bottom: 8rem; }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+      gap: 1.6rem;
+    }
+
+    .card {
+      background: #02144d;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 0.4rem;
+      padding: 2.8rem 2.4rem;
+      transition: border-color 0.4s, transform 0.3s, box-shadow 0.3s;
+      position: relative;
+      overflow: hidden;
+    }
+    .card:hover {
+      border-color: rgba(255,255,255,0.2);
+      transform: translateY(-3px);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+
+    /* Skeleton shimmer */
+    .card.skeleton .card__value,
+    .card.skeleton .card__label,
+    .card.skeleton .card__unit {
+      background: rgba(255,255,255,0.06);
+      border-radius: 0.4rem;
+      color: transparent;
+      position: relative;
+      overflow: hidden;
+    }
+    .card.skeleton .card__value::after,
+    .card.skeleton .card__label::after,
+    .card.skeleton .card__unit::after {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.06) 50%, transparent 100%);
+      animation: shimmer 1.4s infinite;
+    }
+    @keyframes shimmer {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+
+    /* Card entrance animation */
+    @keyframes fadeSlideUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .card.entering { animation: fadeSlideUp 0.4s ease forwards; }
+    .card.entering:nth-child(1) { animation-delay: 0.00s; }
+    .card.entering:nth-child(2) { animation-delay: 0.07s; }
+    .card.entering:nth-child(3) { animation-delay: 0.14s; }
+    .card.entering:nth-child(4) { animation-delay: 0.21s; }
+
+    .card__label {
+      font-size: 1.1rem;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #627b9d;
+      margin-bottom: 1.2rem;
+    }
+    .card__value {
+      font-size: 3.2rem;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1;
+      margin-bottom: 0.8rem;
+    }
+    .card__value.sm { font-size: 2rem; }
+    .card__unit {
+      font-size: 1.2rem;
+      font-weight: 300;
+      color: #627b9d;
+    }
+
+    /* Tooltip on lag card */
+    .card[data-tip] { cursor: default; }
+    .card[data-tip]:hover::after {
+      content: attr(data-tip);
+      position: absolute;
+      bottom: calc(100% + 8px); left: 50%;
+      transform: translateX(-50%);
+      background: #122766;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 0.4rem;
+      padding: 0.8rem 1.2rem;
+      font-size: 1.1rem;
+      font-weight: 400;
+      color: #d7e1fb;
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 20;
+    }
+
+    .lag-ok   { color: #86efac; }
+    .lag-warn { color: #fde68a; }
+    .lag-bad  { color: #fca5a5; }
+
+    /* ── Divider ── */
+    .divider {
+      height: 1px;
+      background: rgba(255,255,255,0.08);
+      margin: 6rem 0;
+    }
+
+    /* ── Graphs ── */
+    #graphs { display: none; }
+
+    .graphs-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1.6rem;
+    }
+
+    .graph-card {
+      background: #02144d;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 0.4rem;
+      overflow: hidden;
+      cursor: zoom-in;
+      transition: border-color 0.4s, transform 0.3s, box-shadow 0.3s;
+      animation: fadeSlideUp 0.4s ease forwards;
+    }
+    .graph-card:nth-child(1) { animation-delay: 0.0s; }
+    .graph-card:nth-child(2) { animation-delay: 0.1s; }
+    .graph-card:hover {
+      border-color: rgba(255,255,255,0.2);
+      transform: translateY(-3px);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+
+    .graph-card__label {
+      padding: 1.6rem 2rem;
+      font-size: 1.2rem;
+      font-weight: 500;
+      color: #d7e1fb;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .graph-card__label::after {
+      content: '↗';
+      font-size: 1.4rem;
+      color: #627b9d;
+      transition: color 0.3s;
+    }
+    .graph-card:hover .graph-card__label::after { color: #d7e1fb; }
+
+    .graph-card img { width: 100%; display: block; margin-bottom: -4px; }
+
+    /* ── Lightbox ── */
+    #lightbox {
+      display: none;
+      position: fixed; inset: 0; z-index: 50;
+      background: rgba(5,8,16,0.92);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      align-items: center; justify-content: center;
+      cursor: zoom-out;
+      animation: fadeIn 0.2s ease;
+    }
+    #lightbox.open { display: flex; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    #lightbox img {
+      max-width: 90vw;
+      max-height: 88vh;
+      border-radius: 0.4rem;
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+      animation: zoomIn 0.25s ease;
+    }
+    @keyframes zoomIn {
+      from { transform: scale(0.92); opacity: 0; }
+      to   { transform: scale(1);    opacity: 1; }
+    }
+    #lightbox-close {
+      position: absolute; top: 2.4rem; right: 2.4rem;
+      font-size: 2.4rem; color: #627b9d;
+      cursor: pointer; line-height: 1;
+      transition: color 0.3s;
+    }
+    #lightbox-close:hover { color: #fff; }
+
+    /* ── Responsive ── */
+    @media (max-width: 640px) {
+      main { padding: 6rem 1.6rem 8rem; }
+      header { padding: 0 1.6rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <div id="progress-bar"></div>
+
+  <div id="lightbox" onclick="closeLightbox()">
+    <span id="lightbox-close">✕</span>
+    <img id="lightbox-img" src="" alt="" onclick="event.stopPropagation()" />
+  </div>
+
+  <header>
+    <div class="logo">NO₂ Forecast <span>// Yerevan</span></div>
+  </header>
+
+  <main>
+
+    <section class="hero">
+      <div class="hero__content">
+        <div class="hero__tag">Atmospheric Intelligence</div>
+        <h1 class="hero__title">Next-Day Tropospheric<br><span>NO₂ Prediction</span></h1>
+        <p class="hero__desc">
+          Fetches the latest Sentinel-5P TROPOMI and ERA5 meteorological data,
+          then runs a LightGBM model to forecast tomorrow's NO₂ column over Yerevan.
+        </p>
+        <button class="btn" id="btn" onclick="runPrediction()">Run Prediction</button>
+        <div id="status"></div>
+        <div id="error"></div>
+      </div>
+      <div class="hero__visual">
+        <canvas id="sphere-canvas"></canvas>
+      </div>
+    </section>
+
+    <div id="result">
+      <div class="section-label">Forecast Output</div>
+      <div class="cards">
+        <div class="card" id="c-date">
+          <div class="card__label">Target Date</div>
+          <div class="card__value sm" id="r-date">—</div>
+          <div class="card__unit">next-day forecast</div>
+        </div>
+        <div class="card" id="c-umol">
+          <div class="card__label">Predicted NO₂</div>
+          <div class="card__value" id="r-umol">—</div>
+          <div class="card__unit">µmol / m²</div>
+        </div>
+        <div class="card" id="c-mol">
+          <div class="card__label">Predicted NO₂</div>
+          <div class="card__value sm" id="r-mol">—</div>
+          <div class="card__unit">mol / m²</div>
+        </div>
+        <div class="card" id="c-lag" data-tip="ERA5 reanalysis has ~5 day publication latency">
+          <div class="card__label">ERA5 Data Lag</div>
+          <div class="card__value" id="r-lag">—</div>
+          <div class="card__unit">days behind today</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="graphs">
+      <div class="divider"></div>
+      <div class="section-label">Model Diagnostics</div>
+      <div class="graphs-grid">
+        <div class="graph-card" onclick="openLightbox('predictions')">
+          <div class="graph-card__label">Predicted vs Actual — test set</div>
+          <img id="img-predictions" src="" alt="Predictions plot" />
+        </div>
+        <div class="graph-card" onclick="openLightbox('importance')">
+          <div class="graph-card__label">Top-20 Feature Importances</div>
+          <img id="img-importance" src="" alt="Feature importance" />
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // ── 3D Wireframe Sphere ───────────────────────────────────
+    (function() {
+      const canvas = document.getElementById('sphere-canvas');
+      const SIZE = 505;
+      canvas.width = SIZE;
+      canvas.height = SIZE;
+      const ctx = canvas.getContext('2d');
+      const cx = SIZE / 2, cy = SIZE / 2;
+      const R = 210;
+
+      let yaw = 0;
+      let t   = 0;
+      const tilt = 0.38;
+
+      // Irregular radius — sum of sine harmonics at different frequencies
+      function r(phi, theta) {
+        return R
+          + 22 * Math.sin(2 * phi  + 1.3 * theta + t * 0.55)
+          + 14 * Math.sin(3 * theta - phi         + t * 0.40)
+          +  9 * Math.sin(5 * phi  + 2   * theta  + t * 0.25)
+          +  6 * Math.sin(4 * theta               + t * 0.70);
+      }
+
+      function project(x, y, z) {
+        const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
+        const x1 =  x * cosY + z * sinY;
+        const z1 = -x * sinY + z * cosY;
+        const cosX = Math.cos(tilt), sinX = Math.sin(tilt);
+        const y2 = y * cosX - z1 * sinX;
+        const z2 = y * sinX + z1 * cosX;
+        return { sx: cx + x1, sy: cy + y2, depth: z2 };
+      }
+
+      function alpha(depth) {
+        return 0.05 + 0.55 * ((depth + R + 60) / (2 * R + 120));
+      }
+
+      const LAT   = 12;
+      const LON   = 16;
+      const SEGS  = 80;
+
+      function drawShape() {
+        ctx.clearRect(0, 0, SIZE, SIZE);
+
+        // Latitude-like rings (constant phi, vary theta)
+        for (let i = 1; i < LAT; i++) {
+          const phi = (i / LAT) * Math.PI;
+          const pts = [];
+          for (let j = 0; j <= SEGS; j++) {
+            const theta = (j / SEGS) * 2 * Math.PI;
+            const rad   = r(phi, theta);
+            pts.push(project(
+              rad * Math.sin(phi) * Math.cos(theta),
+              rad * Math.cos(phi),
+              rad * Math.sin(phi) * Math.sin(theta),
+            ));
+          }
+          ctx.beginPath();
+          pts.forEach((p, idx) => idx === 0 ? ctx.moveTo(p.sx, p.sy) : ctx.lineTo(p.sx, p.sy));
+          const mid = pts[Math.round(SEGS / 2)];
+          ctx.strokeStyle = `rgba(215,225,251,${alpha(mid.depth).toFixed(2)})`;
+          ctx.lineWidth = 0.9;
+          ctx.stroke();
+        }
+
+        // Longitude-like lines (constant theta, vary phi)
+        for (let i = 0; i < LON; i++) {
+          const theta = (i / LON) * Math.PI;
+          const pts = [];
+          for (let j = 0; j <= SEGS; j++) {
+            const phi = (j / SEGS) * 2 * Math.PI;
+            const rad = r(phi, theta);
+            pts.push(project(
+              rad * Math.sin(phi) * Math.cos(theta),
+              rad * Math.cos(phi),
+              rad * Math.sin(phi) * Math.sin(theta),
+            ));
+          }
+          ctx.beginPath();
+          pts.forEach((p, idx) => idx === 0 ? ctx.moveTo(p.sx, p.sy) : ctx.lineTo(p.sx, p.sy));
+          const mid = pts[Math.round(SEGS / 2)];
+          ctx.strokeStyle = `rgba(215,225,251,${alpha(mid.depth).toFixed(2)})`;
+          ctx.lineWidth = 0.9;
+          ctx.stroke();
+        }
+
+        yaw += 0.004;
+        t   += 0.012;
+        requestAnimationFrame(drawShape);
+      }
+
+      drawShape();
+    })();
+  </script>
+
+  <script>
+    const statusMessages = [
+      'Initializing GEE connection…',
+      'Fetching Sentinel-5P NO₂ data…',
+      'Syncing ERA5 meteorological covariates…',
+      'Processing daily aggregates…',
+      'Running LightGBM inference…',
+      'Computing forecast…',
+    ];
+
+    let stepInterval = null;
+    let progressInterval = null;
+
+    // ── Progress bar ──────────────────────────────────────────
+    function startProgress() {
+      const bar = document.getElementById('progress-bar');
+      let w = 0;
+      bar.style.width = '0%';
+      progressInterval = setInterval(() => {
+        w = w < 85 ? w + (85 - w) * 0.04 : w;
+        bar.style.width = w + '%';
+      }, 200);
+    }
+
+    function finishProgress() {
+      clearInterval(progressInterval);
+      const bar = document.getElementById('progress-bar');
+      bar.style.width = '100%';
+      setTimeout(() => { bar.style.transition = 'opacity 0.4s'; bar.style.opacity = '0'; }, 400);
+      setTimeout(() => { bar.style.width = '0%'; bar.style.opacity = '1'; bar.style.transition = 'width 0.4s ease'; }, 900);
+    }
+
+    // ── Status cycling ────────────────────────────────────────
+    function startStatus() {
+      let i = 0;
+      const el = document.getElementById('status');
+      el.textContent = statusMessages[0];
+      stepInterval = setInterval(() => {
+        el.style.opacity = '0';
+        setTimeout(() => {
+          i = (i + 1) % statusMessages.length;
+          el.textContent = statusMessages[i];
+          el.style.opacity = '1';
+        }, 150);
+      }, 3000);
+    }
+
+    function stopStatus(msg) {
+      clearInterval(stepInterval);
+      const el = document.getElementById('status');
+      el.style.opacity = '0';
+      setTimeout(() => { el.textContent = msg; el.style.opacity = '1'; }, 150);
+    }
+
+    // ── Skeleton cards ────────────────────────────────────────
+    function showSkeletons() {
+      ['c-date','c-umol','c-mol','c-lag'].forEach(id => {
+        document.getElementById(id).classList.add('skeleton');
+      });
+      document.getElementById('result').style.display = 'block';
+    }
+
+    function clearSkeletons() {
+      ['c-date','c-umol','c-mol','c-lag'].forEach((id, i) => {
+        const card = document.getElementById(id);
+        card.classList.remove('skeleton');
+        card.classList.add('entering');
+        setTimeout(() => card.classList.remove('entering'), 600);
+      });
+    }
+
+    // ── Animated counter ──────────────────────────────────────
+    function animateCount(el, target, decimals) {
+      const duration = 800;
+      const start = performance.now();
+      function tick(now) {
+        const t = Math.min((now - start) / duration, 1);
+        const ease = 1 - Math.pow(1 - t, 3);
+        el.textContent = (target * ease).toFixed(decimals);
+        if (t < 1) requestAnimationFrame(tick);
+        else el.textContent = target.toFixed(decimals);
+      }
+      requestAnimationFrame(tick);
+    }
+
+    // ── Lightbox ──────────────────────────────────────────────
+    function openLightbox(which) {
+      const src = which === 'predictions'
+        ? document.getElementById('img-predictions').src
+        : document.getElementById('img-importance').src;
+      document.getElementById('lightbox-img').src = src;
+      document.getElementById('lightbox').classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeLightbox() {
+      document.getElementById('lightbox').classList.remove('open');
+      document.body.style.overflow = '';
+    }
+
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+
+    // ── Main prediction flow ──────────────────────────────────
+    async function runPrediction() {
+      const btn       = document.getElementById('btn');
+      const errorDiv  = document.getElementById('error');
+      const graphsDiv = document.getElementById('graphs');
+
+      btn.disabled = true;
+      errorDiv.style.display = 'none';
+      graphsDiv.style.display = 'none';
+
+      startProgress();
+      startStatus();
+      showSkeletons();
+
+      try {
+        const resp = await fetch('/predict', { method: 'POST' });
+        const data = await resp.json();
+
+        if (data.status === 'ok') {
+          clearSkeletons();
+          stopStatus('Forecast complete.');
+          finishProgress();
+
+          document.getElementById('r-date').textContent = data.target_date;
+          animateCount(document.getElementById('r-umol'), data.predicted_no2_umol_m2, 4);
+          document.getElementById('r-mol').textContent = data.predicted_no2_mol_m2.toExponential(4);
+
+          const lagEl = document.getElementById('r-lag');
+          animateCount(lagEl, data.era5_lag_days, 0);
+          lagEl.className = 'card__value ' +
+            (data.era5_lag_days <= 5 ? 'lag-ok' : data.era5_lag_days <= 10 ? 'lag-warn' : 'lag-bad');
+
+          const ts = Date.now();
+          document.getElementById('img-predictions').src = '/figures/predictions_test.png?t=' + ts;
+          document.getElementById('img-importance').src  = '/figures/feature_importance.png?t=' + ts;
+          graphsDiv.style.display = 'block';
+
+          document.getElementById('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+        } else {
+          finishProgress();
+          stopStatus('');
+          document.getElementById('result').style.display = 'none';
+          errorDiv.textContent = data.message;
+          errorDiv.style.display = 'block';
+        }
+      } catch (err) {
+        finishProgress();
+        stopStatus('');
+        document.getElementById('result').style.display = 'none';
+        errorDiv.textContent = 'Request failed: ' + err.message;
+        errorDiv.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+  </script>
+
+</body>
+</html>
