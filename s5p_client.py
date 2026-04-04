@@ -66,8 +66,20 @@ class S5PClient:
         self.bbox = bbox
         PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
-        ee.Initialize(project=project)
-        logger.info("GEE initialized with project: %s", project)
+        import os, json, tempfile
+        sa_json_str = os.environ.get("GEE_SERVICE_ACCOUNT_JSON")
+        if sa_json_str:
+            sa_info = json.loads(sa_json_str)
+            sa_email = sa_info["client_email"]
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+                json.dump(sa_info, f)
+                key_file = f.name
+            credentials = ee.ServiceAccountCredentials(sa_email, key_file)
+            ee.Initialize(credentials, project=project)
+            logger.info("GEE initialized via service account (project=%s)", project)
+        else:
+            ee.Initialize(project=project)
+            logger.info("GEE initialized with project: %s", project)
 
         # GEE geometry for the Yerevan bounding box
         self._region = ee.Geometry.Rectangle([
