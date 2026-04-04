@@ -3,7 +3,11 @@ config.py — Shared constants, paths, and model hyperparameters.
 """
 
 import logging
+import os
 from pathlib import Path
+
+from dotenv import load_dotenv
+load_dotenv()
 
 # ── Geographic ────────────────────────────────────────────────────────────────
 YEREVAN_LAT = 40.18

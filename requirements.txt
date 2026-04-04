@@ -18,3 +18,6 @@ holidays>=0.46
 
 # Visualisation
 matplotlib>=3.7
+
+# Environment
+python-dotenv>=1.0

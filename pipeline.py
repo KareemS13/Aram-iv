@@ -28,6 +28,7 @@ Credentials
 
 import argparse
 import json
+import os
 import sys
 from datetime import date, timedelta
 
@@ -44,7 +45,7 @@ from config import (
 logger = get_logger("pipeline")
 
 DEFAULT_START = date(2019, 1, 1)
-DEFAULT_GEE_PROJECT = "ee-kareemsaffarini9"
+DEFAULT_GEE_PROJECT = os.environ.get("GEE_PROJECT", "ee-kareemsaffarini9")
 
 
 def _parse_date(s: str) -> date:
