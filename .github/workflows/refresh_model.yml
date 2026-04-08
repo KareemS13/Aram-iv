@@ -25,10 +25,7 @@ jobs:
 
       - name: Write CDS API config
         run: |
-          cat > ~/.cdsapirc << EOF
-          url: ${{ secrets.CDS_URL }}
-          key: ${{ secrets.CDS_KEY }}
-          EOF
+          printf "url: %s\nkey: %s\n" "${{ secrets.CDS_URL }}" "${{ secrets.CDS_KEY }}" > ~/.cdsapirc
 
       - name: Write GEE service account key
         run: echo '${{ secrets.GEE_SERVICE_ACCOUNT_JSON }}' > /tmp/gee_key.json
