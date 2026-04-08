@@ -1,0 +1,108 @@
+name: Refresh NO2 Data & Retrain Model
+
+on:
+  schedule:
+    - cron: "0 3 1,15 * *"   # 3 AM UTC on the 1st and 15th of every month
+  workflow_dispatch:           # allow manual trigger from GitHub UI
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write CDS API config
+        run: |
+          cat > ~/.cdsapirc << EOF
+          url: ${{ secrets.CDS_URL }}
+          key: ${{ secrets.CDS_KEY }}
+          EOF
+
+      - name: Write GEE service account key
+        run: echo '${{ secrets.GEE_SERVICE_ACCOUNT_JSON }}' > /tmp/gee_key.json
+
+      - name: Ingest latest S5P NO2 via GEE
+        env:
+          GEE_SERVICE_ACCOUNT_JSON: ${{ secrets.GEE_SERVICE_ACCOUNT_JSON }}
+          GEE_PROJECT: ${{ secrets.GEE_PROJECT }}
+        run: |
+          python - <<'EOF'
+          import os
+          from datetime import date, timedelta
+          from config import NO2_DAILY_CSV
+          from s5p_client import S5PClient
+
+          project = os.environ.get("GEE_PROJECT", "ee-kareemsaffarini9")
+          end = date.today() - timedelta(days=1)
+          start = date(2019, 1, 1)
+
+          client = S5PClient(project=project, output_csv=NO2_DAILY_CSV)
+          df = client.fetch(start, end)
+          print(f"NO2 series: {len(df)} days, last: {df.index.max().date()}")
+          EOF
+
+      - name: Fetch latest ERA5 monthly files
+        env:
+          CDS_URL: ${{ secrets.CDS_URL }}
+          CDS_KEY: ${{ secrets.CDS_KEY }}
+        run: |
+          python - <<'EOF'
+          from datetime import date, timedelta
+          from config import RAW_ERA5_DIR
+          from era5_client import ERA5Client
+
+          end = date.today() - timedelta(days=5)   # ERA5 has ~5 day lag
+          start = date(2019, 1, 1)
+          client = ERA5Client(download_dir=RAW_ERA5_DIR)
+          paths = client.fetch_date_range(start, end)
+          print(f"ERA5 files: {len(paths)}")
+          EOF
+
+      - name: Process ERA5 NetCDF → daily CSV
+        run: |
+          python - <<'EOF'
+          from config import RAW_ERA5_DIR, ERA5_DAILY_CSV, RAW_ERA5_SOLAR_DIR, SOLAR_DAILY_CSV
+          from era5_processor import ERA5Processor, SolarProcessor
+
+          nc_paths = sorted(RAW_ERA5_DIR.glob("era5_*.nc"))
+          ERA5Processor(output_csv=ERA5_DAILY_CSV).process_all(nc_paths)
+
+          solar_paths = sorted(RAW_ERA5_SOLAR_DIR.glob("solar_*.nc"))
+          if solar_paths:
+              SolarProcessor(output_csv=SOLAR_DAILY_CSV).process_all(solar_paths)
+          EOF
+
+      - name: Build feature matrix
+        run: python -c "from features import FeatureEngineer; FeatureEngineer().build()"
+
+      - name: Retrain ensemble model
+        run: |
+          python - <<'EOF'
+          from model import NO2Forecaster
+          from config import FEATURES_CSV, MODEL_PATH, FIGURES_DIR
+
+          forecaster = NO2Forecaster(features_csv=FEATURES_CSV, model_path=MODEL_PATH, figures_dir=FIGURES_DIR)
+          model = forecaster.train()
+          results = forecaster.evaluate(model)
+          print(f"Test R²={results['test_r2']:.4f}  MAE={results['test_mae']:.4f}")
+          EOF
+
+      - name: Commit updated data & model
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/processed/ models/ensemble_no2.pkl figures/
+          git diff --cached --quiet || git commit -m "chore: refresh NO2 data and retrain model [$(date -u +%Y-%m-%d)]"
+          git push
