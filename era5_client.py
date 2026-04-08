@@ -54,8 +54,8 @@ class ERA5Client:
         # Build cdsapi client kwargs; omit keys not provided so the
         # library falls back to ~/.cdsapirc for missing values.
         client_kwargs: dict = {"quiet": True}
-        url = cds_url or os.environ.get("CDS_URL")
-        key = cds_key or os.environ.get("CDS_KEY")
+        url = (cds_url or os.environ.get("CDS_URL") or "").strip()
+        key = (cds_key or os.environ.get("CDS_KEY") or "").strip()
         if url:
             client_kwargs["url"] = url
         if key:
