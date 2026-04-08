@@ -53,7 +53,9 @@ ERA5_VARIABLES = [
     "total_precipitation",
 ]
 # CDS area order: [North, West, South, East]
-ERA5_AREA = [BBOX["north"], BBOX["west"], BBOX["south"], BBOX["east"]]
+# Add 1° buffer so MARS can clip the ERA5 grid (Yerevan bbox alone is smaller
+# than the 0.25° ERA5 grid resolution and causes MARS to reject the request).
+ERA5_AREA = [BBOX["north"] + 1.0, BBOX["west"] - 1.0, BBOX["south"] - 1.0, BBOX["east"] + 1.0]
 ERA5_TIMES = [f"{h:02d}:00" for h in range(24)]
 
 # Short variable names as they appear in ERA5 NetCDF output
@@ -70,14 +72,16 @@ ERA5_SHORT_NAMES = {
 DATA_DIR = Path("data")
 RAW_S5P_DIR = DATA_DIR / "raw_s5p"
 RAW_ERA5_DIR = DATA_DIR / "raw_era5"
+RAW_ERA5_SOLAR_DIR = DATA_DIR / "raw_era5_solar"
 PROCESSED_DIR = DATA_DIR / "processed"
 MODELS_DIR = Path("models")
 FIGURES_DIR = Path("figures")
 
 NO2_DAILY_CSV = PROCESSED_DIR / "no2_daily.csv"
 ERA5_DAILY_CSV = PROCESSED_DIR / "era5_daily.csv"
+SOLAR_DAILY_CSV = PROCESSED_DIR / "solar_daily.csv"
 FEATURES_CSV = PROCESSED_DIR / "features.csv"
-MODEL_PATH = MODELS_DIR / "lgbm_no2.pkl"
+MODEL_PATH = MODELS_DIR / "ensemble_no2.pkl"
 
 # ── Model hyperparameters ─────────────────────────────────────────────────────
 RANDOM_SEED = 42
@@ -99,6 +103,35 @@ LGBM_PARAMS = {
     "random_state": RANDOM_SEED,
     "n_jobs": -1,
     "verbose": -1,
+}
+
+XGB_PARAMS = {
+    "objective": "reg:squarederror",
+    "n_estimators": 1000,
+    "learning_rate": 0.02,
+    "max_depth": 4,
+    "min_child_weight": 5,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_alpha": 0.05,
+    "reg_lambda": 0.1,
+    "random_state": RANDOM_SEED,
+    "n_jobs": -1,
+    "verbosity": 0,
+    "early_stopping_rounds": 100,
+}
+
+RF_PARAMS = {
+    "n_estimators": 500,
+    "max_depth": 8,
+    "min_samples_leaf": 5,
+    "max_features": 0.7,
+    "random_state": RANDOM_SEED,
+    "n_jobs": -1,
+}
+
+RIDGE_PARAMS = {
+    "alpha": 1.0,
 }
 
 # ── Logging ───────────────────────────────────────────────────────────────────

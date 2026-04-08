@@ -18,6 +18,8 @@ from config import (
     ERA5_DAILY_CSV,
     PROCESSED_DIR,
     RAW_ERA5_DIR,
+    RAW_ERA5_SOLAR_DIR,
+    SOLAR_DAILY_CSV,
     get_logger,
 )
 
@@ -77,7 +79,6 @@ class ERA5Processor:
         Returns a DataFrame indexed by date (one row per day).
         """
         # New CDS API wraps NetCDF inside a ZIP — detect and extract
-        actual_path = nc_path
         _tmp_dir = None
         with open(nc_path, "rb") as f:
             is_zip = f.read(2) == b"PK"
@@ -87,10 +88,13 @@ class ERA5Processor:
                 nc_names = [n for n in zf.namelist() if n.endswith(".nc")]
                 if not nc_names:
                     raise ValueError(f"No .nc file found inside {nc_path.name}")
-                zf.extract(nc_names[0], _tmp_dir)
-                actual_path = Path(_tmp_dir) / nc_names[0]
-
-        ds = xr.open_dataset(str(actual_path))
+                for name in nc_names:
+                    zf.extract(name, _tmp_dir)
+            # Merge all .nc files inside the ZIP (instant + accumulated streams)
+            datasets = [xr.open_dataset(str(Path(_tmp_dir) / n)) for n in nc_names]
+            ds = xr.merge(datasets)
+        else:
+            ds = xr.open_dataset(str(nc_path))
 
         # New CDS API uses 'valid_time' instead of 'time' — rename to 'time'
         if "valid_time" in ds.dims and "time" not in ds.dims:
@@ -103,17 +107,25 @@ class ERA5Processor:
             if drop_var in ds.coords or drop_var in ds.data_vars:
                 ds = ds.drop_vars(drop_var, errors="ignore")
 
-        # Clip to bounding box — ERA5 lat is descending (north first)
-        lat_slice = slice(self.bbox["north"], self.bbox["south"])
-        lon_slice = slice(self.bbox["west"], self.bbox["east"])
-
         lat_dim = "latitude" if "latitude" in ds.dims else "lat"
         lon_dim = "longitude" if "longitude" in ds.dims else "lon"
 
-        ds = ds.sel({lat_dim: lat_slice, lon_dim: lon_slice})
+        # Try clipping to bbox first; fall back to nearest grid point if bbox
+        # is smaller than the ERA5 grid resolution (~0.25°) and returns nothing.
+        lat_slice = slice(self.bbox["north"], self.bbox["south"])
+        lon_slice = slice(self.bbox["west"], self.bbox["east"])
+        ds_clipped = ds.sel({lat_dim: lat_slice, lon_dim: lon_slice})
 
-        # Spatial mean over the clipped region
-        ds_spatial = ds.mean(dim=[lat_dim, lon_dim])
+        if ds_clipped[lat_dim].size == 0 or ds_clipped[lon_dim].size == 0:
+            # Bbox too small — select nearest grid point to bbox centre
+            centre_lat = (self.bbox["north"] + self.bbox["south"]) / 2
+            centre_lon = (self.bbox["east"] + self.bbox["west"]) / 2
+            ds_clipped = ds.sel(
+                {lat_dim: centre_lat, lon_dim: centre_lon}, method="nearest"
+            )
+            ds_spatial = ds_clipped  # already a point — no spatial mean needed
+        else:
+            ds_spatial = ds_clipped.mean(dim=[lat_dim, lon_dim])
 
         # Only keep the ERA5 variable columns we care about
         keep_vars = list(_RENAME.keys())
@@ -147,7 +159,11 @@ class ERA5Processor:
             )
             frames.append(daily_sum)
 
-        ds.close()
+        if is_zip:
+            for sub_ds in datasets:
+                sub_ds.close()
+        else:
+            ds.close()
 
         df = pd.concat(frames, axis=1) if frames else pd.DataFrame()
         df.index.name = "date"
@@ -214,5 +230,124 @@ class ERA5Processor:
             )
             if not existing.empty:
                 logger.info("Loading cached ERA5 daily CSV from %s", self.output_csv)
+                return existing
+        return self.process_all(nc_paths)
+
+
+class SolarProcessor:
+    """
+    Convert ERA5 surface solar radiation downwards (ssrd) NetCDF files into
+    a daily scalar series.
+
+    ssrd is an accumulated field (J/m²) — hourly values are summed to get
+    the daily total insolation, then saved as 'solar_rad'.
+
+    Parameters
+    ----------
+    raw_dir : Path
+        Directory containing yearly solar NetCDF files (e.g. solar_2018.nc).
+    output_csv : Path
+        Destination CSV with columns: date, solar_rad.
+    bbox : dict
+        Bounding box with keys north/south/east/west.
+    """
+
+    def __init__(
+        self,
+        raw_dir: Path = RAW_ERA5_SOLAR_DIR,
+        output_csv: Path = SOLAR_DAILY_CSV,
+        bbox: dict = BBOX,
+    ) -> None:
+        self.raw_dir = Path(raw_dir)
+        self.output_csv = Path(output_csv)
+        self.bbox = bbox
+        PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _process_file(self, nc_path: Path) -> pd.DataFrame:
+        """
+        Open one solar NetCDF, spatially clip and aggregate, daily sum ssrd.
+
+        Returns a DataFrame indexed by date with column 'solar_rad'.
+        """
+        ds = xr.open_dataset(str(nc_path))
+
+        # Normalise time dimension name
+        if "valid_time" in ds.dims and "time" not in ds.dims:
+            ds = ds.rename({"valid_time": "time"})
+        elif "valid_time" in ds.coords and "time" not in ds.coords:
+            ds = ds.assign_coords(time=ds["valid_time"]).swap_dims({"valid_time": "time"})
+
+        # Drop non-data vars
+        for drop_var in ["number", "expver"]:
+            ds = ds.drop_vars(drop_var, errors="ignore")
+
+        lat_dim = "latitude" if "latitude" in ds.dims else "lat"
+        lon_dim = "longitude" if "longitude" in ds.dims else "lon"
+
+        lat_slice = slice(self.bbox["north"], self.bbox["south"])
+        lon_slice = slice(self.bbox["west"], self.bbox["east"])
+        ds_clipped = ds.sel({lat_dim: lat_slice, lon_dim: lon_slice})
+
+        if ds_clipped[lat_dim].size == 0 or ds_clipped[lon_dim].size == 0:
+            centre_lat = (self.bbox["north"] + self.bbox["south"]) / 2
+            centre_lon = (self.bbox["east"] + self.bbox["west"]) / 2
+            ds_spatial = ds.sel(
+                {lat_dim: centre_lat, lon_dim: centre_lon}, method="nearest"
+            )
+        else:
+            ds_spatial = ds_clipped.mean(dim=[lat_dim, lon_dim])
+
+        # Daily sum of accumulated ssrd (J/m²)
+        daily = (
+            ds_spatial[["ssrd"]]
+            .resample(time="1D")
+            .sum()
+            .to_dataframe()
+            .reset_index()
+            .set_index("time")
+        )
+        ds.close()
+
+        daily.index.name = "date"
+        daily.index = pd.DatetimeIndex(daily.index).normalize()
+        daily.rename(columns={"ssrd": "solar_rad"}, inplace=True)
+        return daily[["solar_rad"]]
+
+    def process_all(self, nc_paths: list[Path]) -> pd.DataFrame:
+        """
+        Process all solar NetCDF files and concatenate into one DataFrame.
+
+        Saves result to self.output_csv and returns the DataFrame.
+        """
+        parts: list[pd.DataFrame] = []
+        for nc_path in sorted(nc_paths):
+            try:
+                part = self._process_file(nc_path)
+                parts.append(part)
+                logger.debug("Processed solar %s: %d days", nc_path.name, len(part))
+            except Exception as exc:
+                logger.warning("Failed to process %s: %s", nc_path.name, exc)
+
+        if not parts:
+            logger.warning("No solar files processed.")
+            return pd.DataFrame()
+
+        df = pd.concat(parts)
+        df = df[~df.index.duplicated(keep="first")].sort_index()
+
+        df.to_csv(self.output_csv)
+        logger.info(
+            "Saved solar daily series: %d days → %s", len(df), self.output_csv
+        )
+        return df
+
+    def load_or_build(self, nc_paths: list[Path]) -> pd.DataFrame:
+        """Load existing CSV if present, else call process_all()."""
+        if self.output_csv.exists():
+            existing = pd.read_csv(
+                self.output_csv, index_col="date", parse_dates=True
+            )
+            if not existing.empty:
+                logger.info("Loading cached solar daily CSV from %s", self.output_csv)
                 return existing
         return self.process_all(nc_paths)

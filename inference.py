@@ -119,11 +119,13 @@ class InferencePipeline:
                 f"Need at least 7 days of NO2 history; only {len(no2_hist)} available."
             )
 
-        lag1 = float(no2_hist.iloc[-1])
-        lag2 = float(no2_hist.iloc[-2]) if len(no2_hist) >= 2 else float("nan")
-        lag7 = float(no2_hist.iloc[-7]) if len(no2_hist) >= 7 else float("nan")
-        roll3 = float(no2_hist.iloc[-3:].mean()) if len(no2_hist) >= 3 else float("nan")
-        roll7 = float(no2_hist.iloc[-7:].mean())
+        def _lag(n):
+            return float(no2_hist.iloc[-n]) if len(no2_hist) >= n else float("nan")
+
+        def _roll(n):
+            return float(no2_hist.iloc[-n:].mean()) if len(no2_hist) >= n else float("nan")
+
+        lag1 = _lag(1)
 
         # ERA5 covariates — use today's values as proxy for tomorrow
         era5 = self._ensure_era5_current()
@@ -134,18 +136,37 @@ class InferencePipeline:
             for col in [
                 "blh", "wind_u10", "wind_v10", "wind_speed",
                 "temp_2m", "surface_pressure", "precip",
-                "precip_log1p", "blh_log",
+                "precip_log1p", "blh_log", "solar_rad",
             ]
         }
 
+        cal = self._calendar_features(target_date)
+        month = cal["month"]
+        is_winter = int(month >= 12 or month <= 2)
+
+        blh   = era5_features.get("blh", float("nan"))
+        wind  = era5_features.get("wind_speed", float("nan"))
+        temp  = era5_features.get("temp_2m", float("nan"))
+
         row = {
-            "no2_lag1": lag1,
-            "no2_lag2": lag2,
-            "no2_lag7": lag7,
-            "no2_roll3": roll3,
-            "no2_roll7": roll7,
+            "no2_lag1":  lag1,
+            "no2_lag2":  _lag(2),
+            "no2_lag3":  _lag(3),
+            "no2_lag4":  _lag(4),
+            "no2_lag5":  _lag(5),
+            "no2_lag7":  _lag(7),
+            "no2_lag14": _lag(14),
+            "no2_roll3":  _roll(3),
+            "no2_roll7":  _roll(7),
+            "no2_roll14": _roll(14),
+            "no2_roll30": _roll(30),
             **era5_features,
-            **self._calendar_features(target_date),
+            **cal,
+            "is_winter":     is_winter,
+            "temp_x_lag1":   temp  * lag1 if not np.isnan(temp)  else float("nan"),
+            "wind_x_lag1":   wind  * lag1 if not np.isnan(wind)  else float("nan"),
+            "winter_x_lag1": is_winter * lag1,
+            "blh_x_lag1":    blh   * lag1 if not np.isnan(blh)   else float("nan"),
         }
 
         # Align to expected feature order

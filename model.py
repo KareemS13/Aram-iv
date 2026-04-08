@@ -11,7 +11,11 @@ import lightgbm as lgb
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import xgboost as xgb
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.preprocessing import StandardScaler
 
 from config import (
     FEATURES_CSV,
@@ -19,13 +23,45 @@ from config import (
     LGBM_PARAMS,
     MODEL_PATH,
     MODELS_DIR,
+    RF_PARAMS,
+    RIDGE_PARAMS,
     TRAIN_FRAC,
     VAL_FRAC,
+    XGB_PARAMS,
     get_logger,
 )
 from features import FeatureEngineer
 
 logger = get_logger(__name__)
+
+
+class EnsembleModel:
+    """
+    Weighted ensemble of LightGBM, XGBoost, Random Forest, and Ridge Regression.
+    Exposes .predict(X) as a drop-in replacement for any single sklearn-style regressor.
+    """
+
+    def __init__(self, models: dict, weights: dict, scaler: StandardScaler | None = None, train_means: pd.Series | None = None) -> None:
+        self.models = models        # {"lgbm": ..., "xgb": ..., "rf": ..., "ridge": ...}
+        self.weights = weights      # {"lgbm": float, ...} — sum to 1.0
+        self.scaler = scaler        # fitted StandardScaler for Ridge
+        self.train_means = train_means  # column means for NaN imputation before Ridge
+
+    def predict(self, X) -> np.ndarray:
+        total = np.zeros(len(X))
+        for name, model in self.models.items():
+            if name == "ridge" and self.scaler is not None:
+                X_filled = pd.DataFrame(X).fillna(self.train_means)
+                X_scaled = self.scaler.transform(X_filled)
+                total += self.weights[name] * model.predict(X_scaled)
+            else:
+                total += self.weights[name] * model.predict(X)
+        return total
+
+    @property
+    def feature_importances_(self) -> np.ndarray:
+        """Return LightGBM feature importances for the existing plot code."""
+        return self.models["lgbm"].feature_importances_
 
 
 class NO2Forecaster:
@@ -77,47 +113,163 @@ class NO2Forecaster:
         )
         return train, val, test
 
+    # ── LightGBM grid search ──────────────────────────────────────────────────
+
+    def _grid_search_lgbm(self, X_train, y_train, X_val, y_val) -> dict:
+        """Find best LightGBM hyperparameters via validation R²."""
+        from itertools import product as iproduct
+        param_grid = {
+            "num_leaves":        [15, 31],
+            "min_child_samples": [5, 10, 20],
+            "reg_lambda":        [0.05, 0.1, 0.2],
+        }
+        base_params = {
+            k: v for k, v in LGBM_PARAMS.items()
+            if k not in param_grid
+        }
+        best_r2, best_params = -np.inf, {}
+        keys, values = zip(*param_grid.items())
+        combos = list(iproduct(*values))
+        logger.info("LGBM grid search: %d combinations …", len(combos))
+        for combo in combos:
+            params = dict(zip(keys, combo))
+            m = lgb.LGBMRegressor(**base_params, **params)
+            m.fit(
+                X_train, y_train,
+                eval_set=[(X_val, y_val)],
+                callbacks=[
+                    lgb.early_stopping(100, verbose=False),
+                    lgb.log_evaluation(period=-1),
+                ],
+            )
+            r2 = r2_score(y_val, m.predict(X_val))
+            if r2 > best_r2:
+                best_r2, best_params = r2, params
+        logger.info("LGBM best params: %s  val R²=%.4f", best_params, best_r2)
+        return best_params
+
+    # ── XGBoost grid search ───────────────────────────────────────────────────
+
+    def _grid_search_xgb(self, X_train, y_train, X_val, y_val) -> dict:
+        """Find best XGBoost hyperparameters via validation R²."""
+        from itertools import product as iproduct
+        param_grid = {
+            "max_depth":        [3, 4, 5, 6],
+            "learning_rate":    [0.01, 0.02, 0.05],
+            "min_child_weight": [3, 5, 10],
+            "subsample":        [0.7, 0.8, 0.9],
+            "colsample_bytree": [0.7, 0.8, 0.9],
+        }
+        base_params = {
+            k: v for k, v in XGB_PARAMS.items()
+            if k not in param_grid and k not in ("early_stopping_rounds", "verbosity")
+        }
+        best_r2, best_params = -np.inf, {}
+        keys, values = zip(*param_grid.items())
+        combos = list(iproduct(*values))
+        logger.info("XGB grid search: %d combinations …", len(combos))
+        for i, combo in enumerate(combos):
+            params = dict(zip(keys, combo))
+            m = xgb.XGBRegressor(
+                **base_params, **params,
+                early_stopping_rounds=100, verbosity=0,
+            )
+            m.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+            r2 = r2_score(y_val, m.predict(X_val))
+            if r2 > best_r2:
+                best_r2, best_params = r2, params
+            if (i + 1) % 50 == 0:
+                logger.info("  [%d/%d] best val R²=%.4f", i + 1, len(combos), best_r2)
+        logger.info("XGB best params: %s  val R²=%.4f", best_params, best_r2)
+        return best_params
+
     # ── Training ──────────────────────────────────────────────────────────────
 
-    def train(self) -> lgb.LGBMRegressor:
+    def train(self) -> EnsembleModel:
         """
-        Load features, split, and train LightGBM with early stopping on val MAE.
-
-        Saves the fitted model to self.model_path.
-        Returns the fitted model.
+        Train LightGBM, XGBoost, Random Forest, and Ridge Regression.
+        Determines ensemble weights from validation R², saves EnsembleModel.
+        Returns the fitted EnsembleModel.
         """
         df = pd.read_csv(self.features_csv, index_col="date", parse_dates=True)
         feature_cols = FeatureEngineer.feature_columns()
         available = [c for c in feature_cols if c in df.columns]
 
         train_df, val_df, _ = self._time_split(df)
-
         X_train = train_df[available]
         y_train = train_df["no2_next"]
         X_val = val_df[available]
         y_val = val_df["no2_next"]
 
-        model = lgb.LGBMRegressor(**LGBM_PARAMS)
-        model.fit(
-            X_train,
-            y_train,
+        # --- LightGBM ---
+        lgbm_model = lgb.LGBMRegressor(**LGBM_PARAMS)
+        lgbm_model.fit(
+            X_train, y_train,
             eval_set=[(X_val, y_val)],
             callbacks=[
                 lgb.early_stopping(stopping_rounds=100, verbose=False),
                 lgb.log_evaluation(period=200),
             ],
         )
+        logger.info("LightGBM best iteration: %d", lgbm_model.best_iteration_)
 
-        logger.info(
-            "Training complete. Best iteration: %d", model.best_iteration_
+        # --- XGBoost (with grid search) ---
+        best_xgb_params = self._grid_search_xgb(X_train, y_train, X_val, y_val)
+        xgb_params = {k: v for k, v in XGB_PARAMS.items() if k != "early_stopping_rounds"}
+        xgb_params.update(best_xgb_params)
+        xgb_model = xgb.XGBRegressor(
+            **xgb_params,
+            early_stopping_rounds=XGB_PARAMS["early_stopping_rounds"],
         )
+        xgb_model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+
+        # --- Random Forest ---
+        rf_model = RandomForestRegressor(**RF_PARAMS)
+        rf_model.fit(X_train, y_train)
+
+        # --- Ridge Regression (requires scaling + NaN imputation) ---
+        train_means = X_train.mean().fillna(0)
+        X_train_filled = X_train.fillna(train_means)
+        X_val_filled = X_val.fillna(train_means)
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train_filled)
+        X_val_scaled = scaler.transform(X_val_filled)
+        ridge_model = Ridge(**RIDGE_PARAMS)
+        ridge_model.fit(X_train_scaled, y_train)
+
+        # --- Determine weights from validation R² ---
+        val_r2 = {
+            "lgbm":  r2_score(y_val, lgbm_model.predict(X_val)),
+            "xgb":   r2_score(y_val, xgb_model.predict(X_val)),
+            "rf":    r2_score(y_val, rf_model.predict(X_val)),
+            "ridge": r2_score(y_val, ridge_model.predict(X_val_scaled)),
+        }
+        logger.info(
+            "Val R²  lgbm=%.4f  xgb=%.4f  rf=%.4f  ridge=%.4f",
+            val_r2["lgbm"], val_r2["xgb"], val_r2["rf"], val_r2["ridge"],
+        )
+
+        r2_values = np.array(list(val_r2.values()))
+        spread = r2_values.max() - r2_values.min()
+
+        if spread < 0.02:
+            weights = {name: 0.25 for name in val_r2}
+            logger.info("Using equal weights (spread=%.3f < 0.02)", spread)
+        else:
+            clipped = np.clip(r2_values, 0, None)
+            total = clipped.sum() or 1.0
+            weights = dict(zip(val_r2.keys(), (clipped / total).tolist()))
+            logger.info("Using weighted ensemble: %s", weights)
+
+        models = {"lgbm": lgbm_model, "xgb": xgb_model, "rf": rf_model, "ridge": ridge_model}
+        ensemble = EnsembleModel(models, weights, scaler=scaler, train_means=train_means)
 
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.model_path, "wb") as fh:
-            pickle.dump({"model": model, "feature_cols": available}, fh)
-        logger.info("Model saved → %s", self.model_path)
+            pickle.dump({"model": ensemble, "feature_cols": available}, fh)
+        logger.info("Ensemble model saved → %s", self.model_path)
 
-        return model
+        return ensemble
 
     # ── Evaluation ────────────────────────────────────────────────────────────
 
@@ -143,13 +295,28 @@ class NO2Forecaster:
         X_test = test_df[available]
         y_test = test_df["no2_next"]
 
-        y_pred = model.predict(X_test)
+        # --- Per-model metrics ---
+        print(f"\n{'Model':<20} {'MAE':>10} {'RMSE':>10} {'R²':>8}")
+        print("-" * 52)
+        for name, sub_model in model.models.items():
+            if name == "ridge" and model.scaler is not None:
+                X_test_filled = pd.DataFrame(X_test).fillna(model.train_means)
+                sub_pred = np.expm1(sub_model.predict(model.scaler.transform(X_test_filled)))
+            else:
+                sub_pred = sub_model.predict(X_test)
+            print(f"  {name.upper():<18} {mean_absolute_error(y_test, sub_pred):>10.4f} "
+                  f"{float(np.sqrt(mean_squared_error(y_test, sub_pred))):>10.4f} "
+                  f"{r2_score(y_test, sub_pred):>8.4f}")
+        print("-" * 52)
 
+        # --- Ensemble ---
+        y_pred = model.predict(X_test)
         mae = mean_absolute_error(y_test, y_pred)
         rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
         r2 = r2_score(y_test, y_pred)
 
-        # Display in µmol/m² for readability
+        print(f"  {'ENSEMBLE':<18} {mae:>10.4f} {rmse:>10.4f} {r2:>8.4f}")
+        print()
         logger.info(
             "Test MAE=%.4f µmol/m²  RMSE=%.4f µmol/m²  R²=%.4f",
             mae, rmse, r2,
@@ -208,7 +375,7 @@ class NO2Forecaster:
 
     # ── Load ──────────────────────────────────────────────────────────────────
 
-    def load_model(self) -> tuple[lgb.LGBMRegressor, list[str]]:
+    def load_model(self) -> tuple[EnsembleModel, list[str]]:
         """Load and return (model, feature_cols) from self.model_path."""
         if not self.model_path.exists():
             raise FileNotFoundError(

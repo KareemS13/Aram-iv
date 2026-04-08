@@ -39,6 +39,8 @@ from config import (
     MODEL_PATH,
     NO2_DAILY_CSV,
     RAW_ERA5_DIR,
+    RAW_ERA5_SOLAR_DIR,
+    SOLAR_DAILY_CSV,
     get_logger,
 )
 
@@ -76,8 +78,8 @@ def cmd_ingest(args: argparse.Namespace) -> None:
 
 
 def cmd_process(_args: argparse.Namespace) -> None:
-    """Build ERA5 daily CSV from raw NetCDF files."""
-    from era5_processor import ERA5Processor
+    """Build ERA5 and solar daily CSVs from raw NetCDF files."""
+    from era5_processor import ERA5Processor, SolarProcessor
 
     nc_paths = sorted(RAW_ERA5_DIR.glob("era5_*.nc"))
     if not nc_paths:
@@ -87,6 +89,14 @@ def cmd_process(_args: argparse.Namespace) -> None:
     era5_proc = ERA5Processor(output_csv=ERA5_DAILY_CSV)
     era5_df = era5_proc.process_all(nc_paths)
     logger.info("ERA5 daily covariates: %d days", len(era5_df))
+
+    solar_paths = sorted(RAW_ERA5_SOLAR_DIR.glob("solar_*.nc"))
+    if solar_paths:
+        solar_proc = SolarProcessor(output_csv=SOLAR_DAILY_CSV)
+        solar_df = solar_proc.process_all(solar_paths)
+        logger.info("Solar daily series: %d days", len(solar_df))
+    else:
+        logger.warning("No solar NC files found in %s — skipping solar processing.", RAW_ERA5_SOLAR_DIR)
 
 
 def cmd_features(_args: argparse.Namespace) -> None:
