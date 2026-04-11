@@ -9,9 +9,10 @@ that cache and returns the result for tomorrow instantly.
 import json
 from datetime import date, timedelta
 
+import pandas as pd
 from flask import Flask, jsonify, render_template, send_from_directory
 
-from config import FIGURES_DIR, PREDICTIONS_CACHE
+from config import FIGURES_DIR, NO2_DAILY_CSV, PREDICTIONS_CACHE
 
 app = Flask(__name__)
 
@@ -47,7 +48,26 @@ def predict():
                 "message": "Predictions are stale. The next scheduled refresh will update them.",
             }), 503
 
-        return jsonify({"status": "ok", **entry, "generated_at": cache.get("generated_at")})
+        # Latest observed NO2 from S5P (has ~3-5 day satellite lag)
+        latest_observed = None
+        latest_observed_date = None
+        try:
+            no2 = pd.read_csv(NO2_DAILY_CSV, index_col="date", parse_dates=True)
+            no2_valid = no2["no2_mean"].dropna()
+            if len(no2_valid):
+                latest_observed = round(float(no2_valid.iloc[-1]) * 1e6, 2)
+                latest_observed_date = no2_valid.index[-1].date().isoformat()
+        except Exception:
+            pass
+
+        return jsonify({
+            "status": "ok",
+            **entry,
+            "generated_at": cache.get("generated_at"),
+            "forecast_14d": cache.get("predictions", []),
+            "latest_observed": latest_observed,
+            "latest_observed_date": latest_observed_date,
+        })
 
     except Exception as exc:
         return jsonify({"status": "error", "message": str(exc)}), 500
