@@ -94,6 +94,28 @@ jobs:
           print(f"Test R²={results['test_r2']:.4f}  MAE={results['test_mae']:.4f}")
           EOF
 
+      - name: Pre-compute 14-day forecast cache
+        run: |
+          python - <<'EOF'
+          import json
+          from datetime import date, timedelta
+          from pathlib import Path
+          from inference import InferencePipeline
+
+          pipeline = InferencePipeline()
+          start = date.today() + timedelta(days=1)
+          predictions = pipeline.predict_range(start, n_days=14)
+          cache = {
+              "generated_at": date.today().isoformat(),
+              "predictions": predictions,
+          }
+          out = Path("data/processed/predictions_cache.json")
+          out.write_text(json.dumps(cache, indent=2))
+          print(f"Cached {len(predictions)} predictions starting {start}")
+          print(f"  Day 1: {predictions[0]['target_date']} = {predictions[0]['predicted_no2_umol_m2']:.2f} µmol/m²")
+          print(f"  Day 14: {predictions[-1]['target_date']} = {predictions[-1]['predicted_no2_umol_m2']:.2f} µmol/m²")
+          EOF
+
       - name: Commit updated data & model
         run: |
           git config user.name  "github-actions[bot]"

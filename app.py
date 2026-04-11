@@ -1,22 +1,17 @@
 """
 app.py — Flask web interface for the Yerevan NO2 forecasting system.
 
-Single page with a "Run Prediction" button that:
-  1. Fetches latest S5P NO2 via GEE (incremental)
-  2. Fetches latest ERA5 monthly files via CDS (skips existing)
-  3. Re-processes ERA5 daily covariates
-  4. Runs next-day inference
-  5. Returns the result as JSON
+Predictions are pre-computed by the bi-weekly GitHub Actions workflow and
+stored in data/processed/predictions_cache.json. The /predict route reads
+that cache and returns the result for tomorrow instantly.
 """
 
+import json
 from datetime import date, timedelta
 
 from flask import Flask, jsonify, render_template, send_from_directory
 
-from config import ERA5_DAILY_CSV, FIGURES_DIR, MODEL_PATH, NO2_DAILY_CSV, RAW_ERA5_DIR
-
-GEE_PROJECT = "ee-kareemsaffarini9"
-DEFAULT_START = date(2019, 1, 1)
+from config import FIGURES_DIR, PREDICTIONS_CACHE
 
 app = Flask(__name__)
 
@@ -29,33 +24,27 @@ def index():
 @app.route("/predict", methods=["POST"])
 def predict():
     try:
-        end = date.today() - timedelta(days=1)
+        if not PREDICTIONS_CACHE.exists():
+            return jsonify({
+                "status": "error",
+                "message": "Predictions not available yet. Data refreshes automatically every 2 weeks.",
+            }), 503
 
-        # 1. Fetch latest NO2 from GEE (incremental)
-        from s5p_client import S5PClient
-        s5p = S5PClient(project=GEE_PROJECT, output_csv=NO2_DAILY_CSV)
-        s5p.fetch(DEFAULT_START, end)
+        cache = json.loads(PREDICTIONS_CACHE.read_text())
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
 
-        # 2. Fetch latest ERA5 monthly files (skips already-downloaded months)
-        from era5_client import ERA5Client
-        era5_client = ERA5Client(download_dir=RAW_ERA5_DIR)
-        era5_client.fetch_date_range(DEFAULT_START, end)
-
-        # 3. Re-process all ERA5 NetCDF → daily CSV
-        from era5_processor import ERA5Processor
-        nc_paths = sorted(RAW_ERA5_DIR.glob("era5_*.nc"))
-        ERA5Processor(output_csv=ERA5_DAILY_CSV).process_all(nc_paths)
-
-        # 4. Run inference
-        from inference import InferencePipeline
-        pipeline = InferencePipeline(
-            model_path=MODEL_PATH,
-            no2_csv=NO2_DAILY_CSV,
-            era5_csv=ERA5_DAILY_CSV,
+        entry = next(
+            (p for p in cache.get("predictions", []) if p["target_date"] == tomorrow),
+            None,
         )
-        result = pipeline.predict()
 
-        return jsonify({"status": "ok", **result})
+        if entry is None:
+            return jsonify({
+                "status": "error",
+                "message": "Today's prediction is not in the cache. The next refresh will update it.",
+            }), 503
+
+        return jsonify({"status": "ok", **entry, "generated_at": cache.get("generated_at")})
 
     except Exception as exc:
         return jsonify({"status": "error", "message": str(exc)}), 500

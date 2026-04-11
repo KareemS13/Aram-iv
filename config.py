@@ -81,6 +81,7 @@ NO2_DAILY_CSV = PROCESSED_DIR / "no2_daily.csv"
 ERA5_DAILY_CSV = PROCESSED_DIR / "era5_daily.csv"
 SOLAR_DAILY_CSV = PROCESSED_DIR / "solar_daily.csv"
 FEATURES_CSV = PROCESSED_DIR / "features.csv"
+PREDICTIONS_CACHE = PROCESSED_DIR / "predictions_cache.json"
 MODEL_PATH = MODELS_DIR / "ensemble_no2.pkl"
 
 # ── Model hyperparameters ─────────────────────────────────────────────────────

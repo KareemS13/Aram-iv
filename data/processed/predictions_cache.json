@@ -1,0 +1,89 @@
+{
+  "generated_at": "2026-04-12",
+  "predictions": [
+    {
+      "target_date": "2026-04-13",
+      "predicted_no2_umol_m2": 55.6871,
+      "predicted_no2_mol_m2": 5.56871e-05,
+      "era5_lag_days": 16
+    },
+    {
+      "target_date": "2026-04-14",
+      "predicted_no2_umol_m2": 55.7233,
+      "predicted_no2_mol_m2": 5.57233e-05,
+      "era5_lag_days": 16
+    },
+    {
+      "target_date": "2026-04-15",
+      "predicted_no2_umol_m2": 56.0279,
+      "predicted_no2_mol_m2": 5.60279e-05,
+      "era5_lag_days": 16
+    },
+    {
+      "target_date": "2026-04-16",
+      "predicted_no2_umol_m2": 55.0416,
+      "predicted_no2_mol_m2": 5.50416e-05,
+      "era5_lag_days": 16
+    },
+    {
+      "target_date": "2026-04-17",
+      "predicted_no2_umol_m2": 55.2363,
+      "predicted_no2_mol_m2": 5.52363e-05,
+      "era5_lag_days": 16
+    },
+    {
+      "target_date": "2026-04-18",
+      "predicted_no2_umol_m2": 50.0885,
+      "predicted_no2_mol_m2": 5.00885e-05,
+      "era5_lag_days": 16
+    },
+    {
+      "target_date": "2026-04-19",
+      "predicted_no2_umol_m2": 54.1357,
+      "predicted_no2_mol_m2": 5.41357e-05,
+      "era5_lag_days": 16
+    },
+    {
+      "target_date": "2026-04-20",
+      "predicted_no2_umol_m2": 53.4885,
+      "predicted_no2_mol_m2": 5.34885e-05,
+      "era5_lag_days": 16
+    },
+    {
+      "target_date": "2026-04-21",
+      "predicted_no2_umol_m2": 53.1035,
+      "predicted_no2_mol_m2": 5.31035e-05,
+      "era5_lag_days": 16
+    },
+    {
+      "target_date": "2026-04-22",
+      "predicted_no2_umol_m2": 53.1786,
+      "predicted_no2_mol_m2": 5.31786e-05,
+      "era5_lag_days": 16
+    },
+    {
+      "target_date": "2026-04-23",
+      "predicted_no2_umol_m2": 53.6603,
+      "predicted_no2_mol_m2": 5.36603e-05,
+      "era5_lag_days": 16
+    },
+    {
+      "target_date": "2026-04-24",
+      "predicted_no2_umol_m2": 55.5648,
+      "predicted_no2_mol_m2": 5.55648e-05,
+      "era5_lag_days": 16
+    },
+    {
+      "target_date": "2026-04-25",
+      "predicted_no2_umol_m2": 46.0443,
+      "predicted_no2_mol_m2": 4.60443e-05,
+      "era5_lag_days": 16
+    },
+    {
+      "target_date": "2026-04-26",
+      "predicted_no2_umol_m2": 51.3501,
+      "predicted_no2_mol_m2": 5.13501e-05,
+      "era5_lag_days": 16
+    }
+  ]
+}

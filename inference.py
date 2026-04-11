@@ -3,7 +3,11 @@ inference.py — Next-day tropospheric NO2 prediction pipeline.
 
 Assembles a single feature row for a target date using recent NO2
 observations and the latest available ERA5 covariates, then runs
-the trained LightGBM model to produce a next-day forecast.
+the trained ensemble model to produce a next-day forecast.
+
+predict()       — single next-day forecast (used at runtime)
+predict_range() — rolling 14-day forecast (used by the refresh workflow
+                  to pre-compute the predictions cache)
 """
 
 from datetime import date, timedelta
@@ -29,9 +33,9 @@ class InferencePipeline:
     Parameters
     ----------
     model_path : Path
-        Path to the pickled LightGBM model.
+        Path to the pickled ensemble model.
     no2_csv : Path
-        Daily NO2 series CSV (must include at least the last 7 days).
+        Daily NO2 series CSV (must include at least the last 14 days).
     era5_csv : Path
         Daily ERA5 covariates CSV.
     era5_client : ERA5Client | None
@@ -95,41 +99,36 @@ class InferencePipeline:
             "is_holiday_lag1": int((target_date - timedelta(days=1)) in am_holidays),
         }
 
-    def _build_inference_row(self, target_date: date) -> pd.DataFrame:
+    def _build_row_from_series(
+        self,
+        no2_series: list[float],
+        era5_row: pd.Series,
+        target_date: date,
+    ) -> pd.DataFrame:
         """
-        Construct a single-row feature DataFrame for target_date (tomorrow).
+        Construct a single-row feature DataFrame from an explicit NO2 series.
 
-        Uses:
-        - no2_lag1/2/7 and rolling means from the NO2 history up to today
-        - ERA5 covariates from today (best available proxy for tomorrow)
-        - Calendar features computed for target_date
+        Parameters
+        ----------
+        no2_series : list[float]
+            NO2 values in µmol/m², most-recent last. At least 14 values required.
+            For rolling forecasts, predicted values are appended to this list
+            before each call so lags stay correct.
+        era5_row : pd.Series
+            ERA5 covariates for the best available proxy date (fixed across the
+            forecast horizon since future ERA5 is unavailable).
+        target_date : date
+            The date being predicted (used for calendar features).
         """
-        # Load NO2 history
-        no2 = pd.read_csv(self.no2_csv, index_col="date", parse_dates=True)
-        no2.sort_index(inplace=True)
+        n = len(no2_series)
 
-        today = date.today()
-        today_ts = pd.Timestamp(today)
+        def _lag(k):
+            return float(no2_series[-k]) if n >= k else float("nan")
 
-        # Require at least 7 days of NO2 history ending on/before today
-        # Convert mol/m² → µmol/m² to match training scale
-        no2_hist = no2[no2.index <= today_ts]["no2_mean"].dropna() * 1e6
-        if len(no2_hist) < 7:
-            raise ValueError(
-                f"Need at least 7 days of NO2 history; only {len(no2_hist)} available."
-            )
-
-        def _lag(n):
-            return float(no2_hist.iloc[-n]) if len(no2_hist) >= n else float("nan")
-
-        def _roll(n):
-            return float(no2_hist.iloc[-n:].mean()) if len(no2_hist) >= n else float("nan")
+        def _roll(k):
+            return float(np.mean(no2_series[-k:])) if n >= k else float("nan")
 
         lag1 = _lag(1)
-
-        # ERA5 covariates — use today's values as proxy for tomorrow
-        era5 = self._ensure_era5_current()
-        era5_row = era5[era5.index <= today_ts].iloc[-1]
 
         era5_features = {
             col: float(era5_row[col]) if col in era5_row.index else float("nan")
@@ -144,9 +143,9 @@ class InferencePipeline:
         month = cal["month"]
         is_winter = int(month >= 12 or month <= 2)
 
-        blh   = era5_features.get("blh", float("nan"))
-        wind  = era5_features.get("wind_speed", float("nan"))
-        temp  = era5_features.get("temp_2m", float("nan"))
+        blh  = era5_features.get("blh", float("nan"))
+        wind = era5_features.get("wind_speed", float("nan"))
+        temp = era5_features.get("temp_2m", float("nan"))
 
         row = {
             "no2_lag1":  lag1,
@@ -163,15 +162,36 @@ class InferencePipeline:
             **era5_features,
             **cal,
             "is_winter":     is_winter,
-            "temp_x_lag1":   temp  * lag1 if not np.isnan(temp)  else float("nan"),
-            "wind_x_lag1":   wind  * lag1 if not np.isnan(wind)  else float("nan"),
+            "temp_x_lag1":   temp * lag1 if not np.isnan(temp) else float("nan"),
+            "wind_x_lag1":   wind * lag1 if not np.isnan(wind) else float("nan"),
             "winter_x_lag1": is_winter * lag1,
-            "blh_x_lag1":    blh   * lag1 if not np.isnan(blh)   else float("nan"),
+            "blh_x_lag1":    blh  * lag1 if not np.isnan(blh)  else float("nan"),
         }
 
-        # Align to expected feature order
         available = [c for c in FEATURE_COLS if c in row]
         return pd.DataFrame([row])[available]
+
+    def _build_inference_row(self, target_date: date) -> pd.DataFrame:
+        """
+        Construct a single-row feature DataFrame for target_date.
+
+        Reads NO2 history and ERA5 from disk, then delegates to
+        _build_row_from_series.
+        """
+        no2 = pd.read_csv(self.no2_csv, index_col="date", parse_dates=True)
+        no2.sort_index(inplace=True)
+
+        today_ts = pd.Timestamp(date.today())
+        no2_hist = no2[no2.index <= today_ts]["no2_mean"].dropna() * 1e6
+        if len(no2_hist) < 7:
+            raise ValueError(
+                f"Need at least 7 days of NO2 history; only {len(no2_hist)} available."
+            )
+
+        era5 = self._ensure_era5_current()
+        era5_row = era5[era5.index <= today_ts].iloc[-1]
+
+        return self._build_row_from_series(list(no2_hist), era5_row, target_date)
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -194,10 +214,9 @@ class InferencePipeline:
         X = self._build_inference_row(target_date)
 
         model, feature_cols = self.forecaster.load_model()
-        X = X[feature_cols]  # align to exact training columns
+        X = X[feature_cols]
         prediction = float(model.predict(X)[0])
 
-        # ERA5 lag diagnostic
         era5 = pd.read_csv(self.era5_csv, index_col="date", parse_dates=True)
         era5_lag = (pd.Timestamp.today().normalize() - era5.index.max()).days
 
@@ -210,8 +229,64 @@ class InferencePipeline:
 
         logger.info(
             "Forecast for %s: %.4f µmol/m² (ERA5 lag: %d days)",
-            target_date,
-            prediction,
-            era5_lag,
+            target_date, prediction, era5_lag,
         )
         return result
+
+    def predict_range(self, start_date: date, n_days: int = 14) -> list[dict]:
+        """
+        Pre-compute a rolling n-day forecast starting from start_date.
+
+        Each day's prediction is fed back as a lag for subsequent days,
+        matching how the model would be used in practice when actual
+        observations are unavailable. ERA5 covariates are fixed to the
+        most recently available row (future ERA5 is unknown at run time).
+
+        Parameters
+        ----------
+        start_date : date
+            First date to predict (typically date.today() + 1 day).
+        n_days : int
+            Number of consecutive days to predict (default 14).
+
+        Returns
+        -------
+        list of dicts, each with keys:
+          target_date, predicted_no2_umol_m2, predicted_no2_mol_m2, era5_lag_days
+        """
+        # Load NO2 history once — series in µmol/m², most-recent last
+        no2 = pd.read_csv(self.no2_csv, index_col="date", parse_dates=True)
+        no2.sort_index(inplace=True)
+        today_ts = pd.Timestamp(date.today())
+        no2_hist = list(no2[no2.index <= today_ts]["no2_mean"].dropna() * 1e6)
+
+        if len(no2_hist) < 14:
+            raise ValueError(
+                f"Need at least 14 days of NO2 history; only {len(no2_hist)} available."
+            )
+
+        # Load model and ERA5 once
+        model, feature_cols = self.forecaster.load_model()
+        era5 = self._ensure_era5_current()
+        era5_row = era5[era5.index <= today_ts].iloc[-1]
+        era5_lag = (pd.Timestamp.today().normalize() - era5.index.max()).days
+
+        results = []
+        for i in range(n_days):
+            target_date = start_date + timedelta(days=i)
+            X = self._build_row_from_series(no2_hist, era5_row, target_date)
+            X = X[feature_cols]
+            pred = float(model.predict(X)[0])
+
+            # Feed prediction back as the next lag-1 value
+            no2_hist.append(pred)
+
+            results.append({
+                "target_date": target_date.isoformat(),
+                "predicted_no2_umol_m2": round(pred, 4),
+                "predicted_no2_mol_m2": round(pred / 1e6, 10),
+                "era5_lag_days": era5_lag,
+            })
+            logger.info("Range forecast %s: %.4f µmol/m²", target_date, pred)
+
+        return results
