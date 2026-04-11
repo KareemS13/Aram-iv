@@ -31,17 +31,20 @@ def predict():
             }), 503
 
         cache = json.loads(PREDICTIONS_CACHE.read_text())
-        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        today = date.today().isoformat()
 
+        # Return the nearest cached prediction whose date is >= today
+        # (tolerates timezone drift between local cache generation and UTC server)
         entry = next(
-            (p for p in cache.get("predictions", []) if p["target_date"] == tomorrow),
+            (p for p in sorted(cache.get("predictions", []), key=lambda x: x["target_date"])
+             if p["target_date"] >= today),
             None,
         )
 
         if entry is None:
             return jsonify({
                 "status": "error",
-                "message": "Today's prediction is not in the cache. The next refresh will update it.",
+                "message": "Predictions are stale. The next scheduled refresh will update them.",
             }), 503
 
         return jsonify({"status": "ok", **entry, "generated_at": cache.get("generated_at")})
