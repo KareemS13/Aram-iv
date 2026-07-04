@@ -120,6 +120,11 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/processed/ models/ensemble_no2.pkl figures/
-          git diff --cached --quiet || git commit -m "chore: refresh NO2 data and retrain model [$(date -u +%Y-%m-%d)]"
+          # Always record when this run happened. This guarantees at least one
+          # commit per run, which resets GitHub's 60-day "repository inactivity"
+          # timer and stops it from auto-disabling this schedule (even in runs
+          # with no new NO2/ERA5 data to commit).
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/processed/last_refresh.txt
+          git add data/processed/ models/ensemble_no2.pkl figures/ data/processed/last_refresh.txt
+          git commit -m "chore: refresh NO2 data and retrain model [$(date -u +%Y-%m-%d)]"
           git push
